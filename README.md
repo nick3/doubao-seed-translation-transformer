@@ -1,0 +1,2 @@
+# doubao-seed-translation-transformer
+将doubao-seed-translation模型的API接口转为兼容OpenAI的chat completion接口的形式
