@@ -45,15 +45,27 @@ function parseTranslationOptions(systemPrompt) {
     try {
         // 优先尝试解析为 JSON
         const jsonOptions = JSON.parse(systemPrompt);
-        if (jsonOptions.source_language) options.source_language = jsonOptions.source_language;
-        if (jsonOptions.target_language) options.target_language = jsonOptions.target_language;
+        if (jsonOptions.source_language) {
+            const convertedSource = getLanguageCode(jsonOptions.source_language);
+            if (convertedSource) options.source_language = convertedSource;
+        }
+        if (jsonOptions.target_language) {
+            const convertedTarget = getLanguageCode(jsonOptions.target_language);
+            if (convertedTarget) options.target_language = convertedTarget;
+        }
         return options;
     } catch (e) {
         // 如果不是 JSON，尝试用正则表达式解析 key:value 格式
-        const sourceLangMatch = systemPrompt.match(/source_language\s*:\s*['"]?(\w+)['"]?/);
-        const targetLangMatch = systemPrompt.match(/target_language\s*:\s*['"]?(\w+)['"]?/);
-        if (sourceLangMatch?.[1]) options.source_language = sourceLangMatch[1];
-        if (targetLangMatch?.[1]) options.target_language = targetLangMatch[1];
+        const sourceLangMatch = systemPrompt.match(/source_language\s*:\s*['"]?([^'"]+)['"]?/);
+        const targetLangMatch = systemPrompt.match(/target_language\s*:\s*['"]?([^'"]+)['"]?/);
+        if (sourceLangMatch?.[1]) {
+            const convertedSource = getLanguageCode(sourceLangMatch[1]);
+            if (convertedSource) options.source_language = convertedSource;
+        }
+        if (targetLangMatch?.[1]) {
+            const convertedTarget = getLanguageCode(targetLangMatch[1]);
+            if (convertedTarget) options.target_language = convertedTarget;
+        }
     }
     return options;
 }
@@ -170,3 +182,48 @@ async function handleRequest(request) {
 addEventListener('fetch', event => {
     event.respondWith(handleRequest(event.request));
 });
+
+// === 语言处理 ===
+const languages = [
+    { code: 'zh', names: ['中文（简体）', 'chinese (simplified)', '简体中文', 'chinese', 'zh'] },
+    { code: 'zh-Hant', names: ['中文（繁体）', 'chinese (traditional)', '繁體中文', 'zh-hant'] },
+    { code: 'en', names: ['英语', 'english', 'en'] },
+    { code: 'ja', names: ['日语', 'japanese', '日本語', 'ja'] },
+    { code: 'ko', names: ['韩语', 'korean', '한국어', 'ko'] },
+    { code: 'de', names: ['德语', 'german', 'deutsch', 'de'] },
+    { code: 'fr', names: ['法语', 'french', 'français', 'fr'] },
+    { code: 'es', names: ['西班牙语', 'spanish', 'español', 'es'] },
+    { code: 'it', names: ['意大利语', 'italian', 'italiano', 'it'] },
+    { code: 'pt', names: ['葡萄牙语', 'portuguese', 'português', 'pt'] },
+    { code: 'ru', names: ['俄语', 'russian', 'русский', 'ru'] },
+    { code: 'th', names: ['泰语', 'thai', 'ไทย', 'th'] },
+    { code: 'vi', names: ['越南语', 'vietnamese', 'tiếng việt', 'vi'] },
+    { code: 'ar', names: ['阿拉伯语', 'arabic', 'العربية', 'ar'] },
+    { code: 'cs', names: ['捷克语', 'czech', 'čeština', 'cs'] },
+    { code: 'da', names: ['丹麦语', 'danish', 'dansk', 'da'] },
+    { code: 'fi', names: ['芬兰语', 'finnish', 'suomi', 'fi'] },
+    { code: 'hr', names: ['克罗地亚语', 'croatian', 'hrvatski', 'hr'] },
+    { code: 'hu', names: ['匈牙利语', 'hungarian', 'magyar', 'hu'] },
+    { code: 'id', names: ['印尼语', 'indonesian', 'bahasa indonesia', 'id'] },
+    { code: 'ms', names: ['马来语', 'malay', 'bahasa melayu', 'ms'] },
+    { code: 'nb', names: ['挪威布克莫尔语', 'norwegian bokmål', 'norsk bokmål', 'nb'] },
+    { code: 'nl', names: ['荷兰语', 'dutch', 'nederlands', 'nl'] },
+    { code: 'pl', names: ['波兰语', 'polish', 'polski', 'pl'] },
+    { code: 'ro', names: ['罗马尼亚语', 'romanian', 'română', 'ro'] },
+    { code: 'sv', names: ['瑞典语', 'swedish', 'svenska', 'sv'] },
+    { code: 'tr', names: ['土耳其语', 'turkish', 'türkçe', 'tr'] },
+    { code: 'uk', names: ['乌克兰语', 'ukrainian', 'українська', 'uk'] },
+];
+
+function getLanguageCode(lang) {
+    if (!lang) {
+        return undefined;
+    }
+    const normalizedLang = lang.toLowerCase().trim();
+    for (const language of languages) {
+        if (language.names.includes(normalizedLang)) {
+            return language.code;
+        }
+    }
+    return lang; // Return original value if no match found
+}
