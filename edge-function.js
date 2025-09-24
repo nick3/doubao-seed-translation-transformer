@@ -212,6 +212,7 @@ function streamDoubaoResponse(upstreamResponse, modelId) {
     let sentRoleChunk = false;
     let closed = false;
     let buffer = '';
+    let bufferedNewlines = '';
 
     const enqueue = (controller, payload) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
@@ -255,8 +256,11 @@ function streamDoubaoResponse(upstreamResponse, modelId) {
                 }
 
                 if (eventName === 'response.output_text.delta') {
-                    const deltaText = eventData.delta;
+                    let deltaText = eventData.delta;
                     if (!deltaText) return;
+                    deltaText = deltaText.replace(/\r/g, '');
+                    if (!deltaText) return;
+
                     if (!sentRoleChunk) {
                         enqueue(controller, {
                             id: streamId,
@@ -267,18 +271,49 @@ function streamDoubaoResponse(upstreamResponse, modelId) {
                         });
                         sentRoleChunk = true;
                     }
-                    enqueue(controller, {
-                        id: streamId,
-                        object: 'chat.completion.chunk',
-                        created: createdAt,
-                        model: modelId,
-                        choices: [{ index: 0, delta: { content: deltaText }, finish_reason: null }]
-                    });
+
+                    if (!/[^\n]/.test(deltaText)) {
+                        bufferedNewlines += deltaText;
+                        return;
+                    }
+
+                    const leadingMatch = deltaText.match(/^\n+/);
+                    const trailingMatch = deltaText.match(/\n+$/);
+                    const leadingNewlines = leadingMatch ? leadingMatch[0] : '';
+                    const trailingNewlines = trailingMatch ? trailingMatch[0] : '';
+                    const contentStart = leadingNewlines.length;
+                    const contentEnd = trailingNewlines ? deltaText.length - trailingNewlines.length : deltaText.length;
+                    const coreContent = deltaText.slice(contentStart, contentEnd);
+
+                    let emitText = '';
+                    if (bufferedNewlines) {
+                        emitText += bufferedNewlines;
+                        bufferedNewlines = '';
+                    }
+                    if (leadingNewlines) {
+                        emitText += leadingNewlines;
+                    }
+                    if (coreContent) {
+                        emitText += coreContent;
+                    }
+
+                    if (emitText) {
+                        enqueue(controller, {
+                            id: streamId,
+                            object: 'chat.completion.chunk',
+                            created: createdAt,
+                            model: modelId,
+                            choices: [{ index: 0, delta: { content: emitText }, finish_reason: null }]
+                        });
+                    }
+
+                    bufferedNewlines = trailingNewlines;
                     return;
                 }
 
                 if (eventName === 'response.completed') {
                     const usage = usageFromDoubao(eventData.response?.usage);
+                    bufferedNewlines = '';
                     const payload = {
                         id: streamId,
                         object: 'chat.completion.chunk',
