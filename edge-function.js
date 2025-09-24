@@ -141,6 +141,12 @@ async function handleRequest(request) {
         const systemPrompt = data.messages?.find?.(m => m?.role === "system")?.content;
         const translationOptions = parseTranslationOptions(systemPrompt);
 
+        const isStream = typeof data.stream === 'boolean'
+            ? data.stream
+            : typeof data.stream === 'string'
+                ? data.stream.toLowerCase() === 'true'
+                : false;
+
         const doubaoPayload = {
             model: modelId,
             input: [{
@@ -150,7 +156,8 @@ async function handleRequest(request) {
                     text: typeof userMsgContent === 'string' ? userMsgContent : JSON.stringify(userMsgContent),
                     translation_options: translationOptions
                 }]
-            }]
+            }],
+            ...(isStream ? { stream: true } : {})
         };
 
         const upstreamResponse = await fetch(CONFIG.DOUBAO_BASE_URL, {
@@ -162,12 +169,26 @@ async function handleRequest(request) {
             body: JSON.stringify(doubaoPayload)
         });
 
-        const doubaoResult = await upstreamResponse.json();
-
         if (!upstreamResponse.ok) {
-            const errorMsg = doubaoResult.error?.message || upstreamResponse.statusText;
+            let errorMsg = upstreamResponse.statusText;
+            try {
+                const errorJson = await upstreamResponse.clone().json();
+                errorMsg = errorJson.error?.message || errorMsg;
+            } catch (err) {
+                try {
+                    errorMsg = await upstreamResponse.clone().text();
+                } catch (_) {
+                    /* no-op */
+                }
+            }
             return errorRes(ERROR_TEMPLATES.upstreamError, upstreamResponse.status, errorMsg);
         }
+
+        if (isStream) {
+            return streamDoubaoResponse(upstreamResponse, modelId);
+        }
+
+        const doubaoResult = await upstreamResponse.json();
 
         return convertToOpenAIResponse(doubaoResult, modelId);
 
@@ -182,6 +203,151 @@ async function handleRequest(request) {
 addEventListener('fetch', event => {
     event.respondWith(handleRequest(event.request));
 });
+
+function streamDoubaoResponse(upstreamResponse, modelId) {
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
+    const streamId = genId('chatcmpl');
+    let createdAt = Math.floor(Date.now() / 1000);
+    let sentRoleChunk = false;
+    let closed = false;
+    let buffer = '';
+
+    const enqueue = (controller, payload) => {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+    };
+
+    const enqueueDone = (controller) => {
+        if (closed) return;
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+        controller.close();
+        closed = true;
+    };
+
+    const usageFromDoubao = usage => usage ? {
+        prompt_tokens: usage.input_tokens || 0,
+        completion_tokens: usage.output_tokens || 0,
+        total_tokens: usage.total_tokens || 0
+    } : undefined;
+
+    const stream = new ReadableStream({
+        start(controller) {
+            const reader = upstreamResponse.body.getReader();
+
+            const handleEvent = (eventName, dataStr) => {
+                if (!dataStr) return;
+                if (dataStr === '[DONE]') {
+                    enqueueDone(controller);
+                    return;
+                }
+
+                let eventData;
+                try {
+                    eventData = JSON.parse(dataStr);
+                } catch (err) {
+                    console.error('Failed to parse SSE chunk', err, dataStr);
+                    return;
+                }
+
+                if (eventName === 'response.created' && eventData.response?.created_at) {
+                    createdAt = eventData.response.created_at;
+                    return;
+                }
+
+                if (eventName === 'response.output_text.delta') {
+                    const deltaText = eventData.delta;
+                    if (!deltaText) return;
+                    if (!sentRoleChunk) {
+                        enqueue(controller, {
+                            id: streamId,
+                            object: 'chat.completion.chunk',
+                            created: createdAt,
+                            model: modelId,
+                            choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }]
+                        });
+                        sentRoleChunk = true;
+                    }
+                    enqueue(controller, {
+                        id: streamId,
+                        object: 'chat.completion.chunk',
+                        created: createdAt,
+                        model: modelId,
+                        choices: [{ index: 0, delta: { content: deltaText }, finish_reason: null }]
+                    });
+                    return;
+                }
+
+                if (eventName === 'response.completed') {
+                    const usage = usageFromDoubao(eventData.response?.usage);
+                    const payload = {
+                        id: streamId,
+                        object: 'chat.completion.chunk',
+                        created: createdAt,
+                        model: modelId,
+                        choices: [{ index: 0, delta: {}, finish_reason: 'stop' }]
+                    };
+                    if (usage) payload.usage = usage;
+                    enqueue(controller, payload);
+                    enqueueDone(controller);
+                    return;
+                }
+
+                // Ignore other metadata events
+            };
+
+            const processBuffer = () => {
+                let delimiterIndex;
+                while ((delimiterIndex = buffer.indexOf('\n\n')) !== -1) {
+                    const rawEvent = buffer.slice(0, delimiterIndex).replace(/\r/g, '');
+                    buffer = buffer.slice(delimiterIndex + 2);
+                    if (!rawEvent.trim()) continue;
+                    const lines = rawEvent.split('\n');
+                    let eventName = '';
+                    const dataLines = [];
+                    for (const line of lines) {
+                        if (line.startsWith('event:')) {
+                            eventName = line.slice(6).trim();
+                        } else if (line.startsWith('data:')) {
+                            dataLines.push(line.slice(5).trim());
+                        }
+                    }
+                    handleEvent(eventName, dataLines.join('\n'));
+                }
+            };
+
+            const pump = () => reader.read()
+                .then(({ done, value }) => {
+                    if (done) {
+                        const remainder = decoder.decode();
+                        if (remainder) {
+                            buffer += remainder;
+                            processBuffer();
+                        }
+                        enqueueDone(controller);
+                        return;
+                    }
+                    buffer += decoder.decode(value, { stream: true });
+                    processBuffer();
+                    pump();
+                })
+                .catch(err => {
+                    controller.error(err);
+                    try { reader.cancel(err); } catch (_) { /* ignore */ }
+                });
+
+            pump();
+        }
+    });
+
+    return new Response(stream, {
+        status: 200,
+        headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            Connection: 'keep-alive'
+        }
+    });
+}
 
 // === 语言处理 ===
 const languages = [
