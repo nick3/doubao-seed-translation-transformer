@@ -70,6 +70,96 @@ function parseTranslationOptions(systemPrompt) {
     return options;
 }
 
+function parseStreamFlag(streamValue) {
+    if (typeof streamValue === "boolean") return streamValue;
+    if (typeof streamValue === "string") return streamValue.toLowerCase() === "true";
+    return false;
+}
+
+function extractTextFromContent(content) {
+    if (typeof content === "string") return content;
+    if (Array.isArray(content)) {
+        for (const part of content) {
+            const text = extractTextFromContent(part);
+            if (text) return text;
+        }
+        return "";
+    }
+    if (content && typeof content === "object") {
+        if (typeof content.text === "string") return content.text;
+        if (typeof content.content === "string") return content.content;
+        if (Array.isArray(content.content)) return extractTextFromContent(content.content);
+    }
+    return "";
+}
+
+function parseResponsesInput(input) {
+    let systemPrompt;
+    let userContent;
+
+    const handleSegment = (segment) => {
+        if (!segment || typeof segment !== "object") return;
+        const role = segment.role;
+        const rawContent = segment.content ?? segment.input ?? segment.text ?? segment.value;
+        const text = extractTextFromContent(rawContent);
+        if (role === "system" && text) {
+            if (!systemPrompt) systemPrompt = text;
+            return;
+        }
+        if ((!role || role === "user") && text && !userContent) {
+            userContent = text;
+        }
+    };
+
+    if (typeof input === "string") {
+        userContent = input;
+    } else if (Array.isArray(input)) {
+        for (const segment of input) {
+            if (typeof segment === "string") {
+                if (!userContent) userContent = segment;
+                continue;
+            }
+            handleSegment(segment);
+        }
+    } else if (input && typeof input === "object") {
+        handleSegment(input);
+    }
+
+    return { systemPrompt, userContent };
+}
+
+function buildDoubaoPayload(modelId, translationOptions, userContent, isStream) {
+    return {
+        model: modelId,
+        input: [{
+            role: "user",
+            content: [{
+                type: "input_text",
+                text: typeof userContent === 'string' ? userContent : JSON.stringify(userContent),
+                translation_options: translationOptions
+            }]
+        }],
+        ...(isStream ? { stream: true } : {})
+    };
+}
+
+function mergeTranslationOverrides(targetOptions, ...sources) {
+    for (const source of sources) {
+        if (!source || typeof source !== 'object') continue;
+        const candidate = typeof source.translation_options === 'object'
+            ? source.translation_options
+            : source;
+        if (candidate.source_language) {
+            const convertedSource = getLanguageCode(candidate.source_language);
+            if (convertedSource) targetOptions.source_language = convertedSource;
+        }
+        if (candidate.target_language) {
+            const convertedTarget = getLanguageCode(candidate.target_language);
+            if (convertedTarget) targetOptions.target_language = convertedTarget;
+        }
+    }
+}
+
 /**
  * 将火山引擎的响应转换为 OpenAI 格式
  * @param {object} doubaoResponse - 火山引擎 API 的响应体
@@ -114,13 +204,82 @@ function convertToOpenAIResponse(doubaoResponse, requestModelId) {
     return new Response(JSON.stringify(openaiResponse), { headers: HEADERS_JSON });
 }
 
+function convertToResponsesResponse(doubaoResponse, requestModelId) {
+    if (doubaoResponse.error) {
+        const errorMessage = doubaoResponse.error.message || JSON.stringify(doubaoResponse.error);
+        return errorRes(ERROR_TEMPLATES.upstreamError, 500, errorMessage);
+    }
+
+    const responsePayload = { ...doubaoResponse };
+    responsePayload.id = responsePayload.id || genId('resp');
+    responsePayload.object = responsePayload.object || 'response';
+    responsePayload.created = responsePayload.created || Math.floor(Date.now() / 1000);
+    responsePayload.model = responsePayload.model || requestModelId;
+    responsePayload.usage = {
+        prompt_tokens: doubaoResponse.usage?.prompt_tokens ?? doubaoResponse.usage?.input_tokens ?? 0,
+        completion_tokens: doubaoResponse.usage?.completion_tokens ?? doubaoResponse.usage?.output_tokens ?? 0,
+        total_tokens: doubaoResponse.usage?.total_tokens
+            ?? ((doubaoResponse.usage?.input_tokens || 0) + (doubaoResponse.usage?.output_tokens || 0))
+    };
+
+    if (!Array.isArray(responsePayload.output)) {
+        const messageContent = doubaoResponse.output
+            ?.find(o => o.type === 'message' && o.role === 'assistant')
+            ?.content?.find(c => c.type === 'output_text')
+            ?.text;
+        responsePayload.output = messageContent
+            ? [{
+                id: genId('msg'),
+                type: 'message',
+                role: 'assistant',
+                content: [{ type: 'output_text', text: messageContent }]
+            }]
+            : [];
+    }
+
+    return new Response(JSON.stringify(responsePayload), { headers: HEADERS_JSON });
+}
+
+async function sendDoubaoRequest(payload, auth) {
+    const upstreamResponse = await fetch(CONFIG.DOUBAO_BASE_URL, {
+        method: 'POST',
+        headers: {
+            'Authorization': auth,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+    });
+
+    if (!upstreamResponse.ok) {
+        let errorMsg = upstreamResponse.statusText;
+        try {
+            const errorJson = await upstreamResponse.clone().json();
+            errorMsg = errorJson.error?.message || errorMsg;
+        } catch (_) {
+            try {
+                errorMsg = await upstreamResponse.clone().text();
+            } catch (__) {
+                /* no-op */
+            }
+        }
+        return { error: errorRes(ERROR_TEMPLATES.upstreamError, upstreamResponse.status, errorMsg) };
+    }
+
+    return { upstreamResponse };
+}
+
 
 // === 主处理函数 ===
 async function handleRequest(request) {
     const url = new URL(request.url);
 
     if (!isHttps(request, url)) return errorRes('https', 400);
-    if (request.method !== 'POST' || url.pathname !== '/v1/chat/completions') return errorRes('notFound', 404);
+    if (request.method !== 'POST') return errorRes('notFound', 404);
+
+    const path = url.pathname;
+    if (path !== '/v1/chat/completions' && path !== '/v1/responses') {
+        return errorRes('notFound', 404);
+    }
 
     const auth = request.headers.get('Authorization');
     if (!auth?.startsWith('Bearer ')) return errorRes('noAuth', 401);
@@ -132,65 +291,11 @@ async function handleRequest(request) {
 
         const data = await request.json();
 
-        const userMsgContent = data.messages?.findLast?.(m => m?.role === "user")?.content;
-        if (!userMsgContent) return errorRes('noMessage');
-
-        const modelId = data.model;
-        if (!modelId) return errorRes('noModel');
-
-        const systemPrompt = data.messages?.find?.(m => m?.role === "system")?.content;
-        const translationOptions = parseTranslationOptions(systemPrompt);
-
-        const isStream = typeof data.stream === 'boolean'
-            ? data.stream
-            : typeof data.stream === 'string'
-                ? data.stream.toLowerCase() === 'true'
-                : false;
-
-        const doubaoPayload = {
-            model: modelId,
-            input: [{
-                role: "user",
-                content: [{
-                    type: "input_text",
-                    text: typeof userMsgContent === 'string' ? userMsgContent : JSON.stringify(userMsgContent),
-                    translation_options: translationOptions
-                }]
-            }],
-            ...(isStream ? { stream: true } : {})
-        };
-
-        const upstreamResponse = await fetch(CONFIG.DOUBAO_BASE_URL, {
-            method: 'POST',
-            headers: {
-                'Authorization': auth,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(doubaoPayload)
-        });
-
-        if (!upstreamResponse.ok) {
-            let errorMsg = upstreamResponse.statusText;
-            try {
-                const errorJson = await upstreamResponse.clone().json();
-                errorMsg = errorJson.error?.message || errorMsg;
-            } catch (err) {
-                try {
-                    errorMsg = await upstreamResponse.clone().text();
-                } catch (_) {
-                    /* no-op */
-                }
-            }
-            return errorRes(ERROR_TEMPLATES.upstreamError, upstreamResponse.status, errorMsg);
+        if (path === '/v1/chat/completions') {
+            return handleChatCompletionsRequest({ data, auth });
         }
 
-        if (isStream) {
-            return streamDoubaoResponse(upstreamResponse, modelId);
-        }
-
-        const doubaoResult = await upstreamResponse.json();
-
-        return convertToOpenAIResponse(doubaoResult, modelId);
+        return handleResponsesRequest({ data, auth });
 
     } catch (e) {
         if (e instanceof SyntaxError) return errorRes('invalidJson');
@@ -199,10 +304,69 @@ async function handleRequest(request) {
     }
 }
 
+async function handleChatCompletionsRequest({ data, auth }) {
+    const userMsgContent = data.messages?.findLast?.(m => m?.role === "user")?.content;
+    if (!userMsgContent) return errorRes('noMessage');
+
+    const modelId = data.model;
+    if (!modelId) return errorRes('noModel');
+
+    const systemPrompt = data.messages?.find?.(m => m?.role === "system")?.content;
+    const translationOptions = parseTranslationOptions(systemPrompt);
+    mergeTranslationOverrides(translationOptions, data.translation_options, data.metadata);
+    const isStream = parseStreamFlag(data.stream);
+
+    const payload = buildDoubaoPayload(modelId, translationOptions, userMsgContent, isStream);
+    const { error, upstreamResponse } = await sendDoubaoRequest(payload, auth);
+    if (error) return error;
+
+    if (isStream) {
+        return streamDoubaoResponse(upstreamResponse, modelId);
+    }
+
+    const doubaoResult = await upstreamResponse.json();
+    return convertToOpenAIResponse(doubaoResult, modelId);
+}
+
+async function handleResponsesRequest({ data, auth }) {
+    const modelId = data.model;
+    if (!modelId) return errorRes('noModel');
+
+    const { systemPrompt, userContent } = parseResponsesInput(data.input);
+    if (!userContent) return errorRes('noMessage');
+
+    const translationOptions = parseTranslationOptions(systemPrompt);
+    mergeTranslationOverrides(translationOptions, data.translation_options, data.metadata);
+    const isStream = parseStreamFlag(data.stream);
+
+    const payload = buildDoubaoPayload(modelId, translationOptions, userContent, isStream);
+    const { error, upstreamResponse } = await sendDoubaoRequest(payload, auth);
+    if (error) return error;
+
+    if (isStream) {
+        return streamResponses(upstreamResponse);
+    }
+
+    const doubaoResult = await upstreamResponse.json();
+    return convertToResponsesResponse(doubaoResult, modelId);
+}
+
 // === EdgeOne 事件监听器 ===
 addEventListener('fetch', event => {
     event.respondWith(handleRequest(event.request));
 });
+
+function streamResponses(upstreamResponse) {
+    const headers = {
+        'Content-Type': upstreamResponse.headers?.get('Content-Type') || 'text/event-stream',
+        'Cache-Control': upstreamResponse.headers?.get('Cache-Control') || 'no-cache',
+        Connection: upstreamResponse.headers?.get('Connection') || 'keep-alive'
+    };
+    return new Response(upstreamResponse.body, {
+        status: 200,
+        headers
+    });
+}
 
 function streamDoubaoResponse(upstreamResponse, modelId) {
     const encoder = new TextEncoder();
