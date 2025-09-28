@@ -70,6 +70,64 @@ API 端点：`https://your-edgeone-domain.com/v1/chat/completions`
 }
 ```
 
+## Go 自托管部署
+
+`go/` 目录内提供了与边缘函数等价的 Go 版本实现，可用于自托管或在容器/虚拟机中运行。
+
+### 本地运行
+
+1. 安装 Go 1.22 或更新版本。
+2. 进入 Go 项目目录：`cd go`
+3. 启动服务：`go run .`
+4. 默认监听 `8080` 端口，可通过环境变量 `PORT` 指定其他端口。
+
+> ⚠️ 服务在本地运行时仍会校验 HTTPS。发送请求时请补充 `X-Forwarded-Proto: https` 头以模拟 EdgeOne：
+
+```bash
+curl -X POST http://127.0.0.1:8080/v1/chat/completions \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -H "X-Forwarded-Proto: https" \
+  -d '{"model":"doubao-seed-translation","messages":[{"role":"system","content":"{\"target_language\":\"ja\"}"},{"role":"user","content":"Hello"}],"stream":false}'
+```
+
+### 构建二进制
+
+```bash
+cd go
+go build -o doubao .
+./doubao
+```
+
+构建输出位于 `go/doubao`，与 Node 版本保持相同的 API 兼容性。
+
+### Docker 镜像
+
+仓库提供 `go/Dockerfile` 以生成跨平台镜像：
+
+```bash
+docker build -f go/Dockerfile -t doubao-proxy .
+docker run --rm -p 8080:8080 -e PORT=8080 doubao-proxy
+```
+
+镜像使用非 root 账户运行，默认监听 `PORT` 环境变量指定的端口。
+
+### GitHub Actions 发布流程
+
+`.github/workflows/ci.yml` 会在每次推送到 `main` 或创建 `v*` 标签时运行：
+
+- 常规分支会执行 `gofmt`、`go vet`、单元测试及 Docker 构建。
+- 推送 `v*` 标签时会额外交叉编译 Linux、macOS、Windows 的二进制包，并以 `tar.gz`/`zip` 形式上传到对应的 GitHub Release。
+
+发布步骤示例：
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+CI 成功后即可在 Releases 页面下载多平台构建产物，用于自托管部署。
+
 ## 配置翻译选项
 
 翻译选项通过 `system` 角色的消息传递，支持 JSON 格式：

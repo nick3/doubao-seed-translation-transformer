@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Verify formatting
+        working-directory: go
+        run: |
+          fmt_out=$(gofmt -l .)
+          if [ -n "$fmt_out" ]; then
+            echo "The following files need gofmt:" >&2
+            echo "$fmt_out" >&2
+            exit 1
+          fi
+
+      - name: Go vet
+        working-directory: go
+        run: go vet ./...
+
+      - name: Go build
+        working-directory: go
+        run: go build ./...
+
+      - name: Go test
+        working-directory: go
+        run: go test ./...
+
+      - name: Docker build
+        run: docker build -f go/Dockerfile .
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Build release artifacts
+        working-directory: go
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          build_target() {
+            local goos="$1"
+            local goarch="$2"
+            local ext=""
+            if [ "$goos" = "windows" ]; then
+              ext=".exe"
+            fi
+            local bin_name="doubao${ext}"
+            echo "Building ${goos}/${goarch}"
+            env CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
+              go build -trimpath -ldflags "-s -w" -o "dist/${bin_name}" .
+            local archive="doubao-${goos}-${goarch}"
+            if [ "$goos" = "windows" ]; then
+              (cd dist && zip -9 "${archive}.zip" "${bin_name}")
+            else
+              (cd dist && tar -czf "${archive}.tar.gz" "${bin_name}")
+            fi
+            rm "dist/${bin_name}"
+          }
+
+          build_target linux amd64
+          build_target linux arm64
+          build_target darwin amd64
+          build_target darwin arm64
+          build_target windows amd64
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            go/dist/doubao-*.tar.gz
+            go/dist/doubao-*.zip
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
