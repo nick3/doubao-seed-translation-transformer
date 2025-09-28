@@ -6,6 +6,10 @@ on:
     tags: [ 'v*' ]
   pull_request:
 
+# 默认最小权限：仅读取仓库内容；需要写权限的 job 单独声明
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -47,6 +51,9 @@ jobs:
     needs: build
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
+    # 仅在发布阶段需要写入 release 资源
+    permissions:
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
