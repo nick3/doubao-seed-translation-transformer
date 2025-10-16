@@ -678,8 +678,8 @@ type languageEntry struct {
 }
 
 var languages = []languageEntry{
-	{Code: "zh", Names: []string{"中文（简体）", "chinese (simplified)", "简体中文", "chinese", "zh"}},
-	{Code: "zh-Hant", Names: []string{"中文（繁体）", "chinese (traditional)", "繁體中文", "zh-hant"}},
+	{Code: "zh", Names: []string{"中文（简体）", "simplified chinese", "简体中文", "chinese", "zh"}},
+	{Code: "zh-Hant", Names: []string{"中文（繁体）", "traditional chinese", "繁體中文", "zh-hant"}},
 	{Code: "en", Names: []string{"英语", "english", "en"}},
 	{Code: "ja", Names: []string{"日语", "japanese", "日本語", "ja"}},
 	{Code: "ko", Names: []string{"韩语", "korean", "한국어", "ko"}},
@@ -705,7 +705,7 @@ var languages = []languageEntry{
 	{Code: "ro", Names: []string{"罗马尼亚语", "romanian", "română", "ro"}},
 	{Code: "sv", Names: []string{"瑞典语", "swedish", "svenska", "sv"}},
 	{Code: "tr", Names: []string{"土耳其语", "turkish", "türkçe", "tr"}},
-	{Code: "uk", Names: []string{"乌克兰语", "ukrainian", "українська", "uk"}},
+	{Code: "uk", Names: []string{"乌克兰语", "ukrainian", "україنська", "uk"}},
 }
 
 func findAssistantMessage(response doubaoResponse) string {
