@@ -705,7 +705,7 @@ var languages = []languageEntry{
 	{Code: "ro", Names: []string{"罗马尼亚语", "romanian", "română", "ro"}},
 	{Code: "sv", Names: []string{"瑞典语", "swedish", "svenska", "sv"}},
 	{Code: "tr", Names: []string{"土耳其语", "turkish", "türkçe", "tr"}},
-	{Code: "uk", Names: []string{"乌克兰语", "ukrainian", "україنська", "uk"}},
+	{Code: "uk", Names: []string{"乌克兰语", "ukrainian", "українська", "uk"}},
 }
 
 func findAssistantMessage(response doubaoResponse) string {
