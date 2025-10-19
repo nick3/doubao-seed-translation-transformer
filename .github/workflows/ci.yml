@@ -25,9 +25,9 @@ jobs:
       - name: Verify formatting
         working-directory: go
         run: |
-          fmt_out=$(gofmt -l .)
+          fmt_out=$(gofmt -s -l .)
           if [ -n "$fmt_out" ]; then
-            echo "The following files need gofmt:" >&2
+            echo "The following files need gofmt (please run 'gofmt -s -w .'):" >&2
             echo "$fmt_out" >&2
             exit 1
           fi

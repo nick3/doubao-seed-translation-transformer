@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Optional pre-commit hook to enforce Go formatting with simplifications
+# To enable: git config core.hooksPath .githooks
+
+ROOT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+GO_DIR="$ROOT_DIR/go"
+
+if [ -d "$GO_DIR" ]; then
+  cd "$GO_DIR"
+  fmt_out=$(gofmt -s -l .)
+  if [ -n "$fmt_out" ]; then
+    echo "以下文件需要 gofmt -s 格式化：" >&2
+    echo "$fmt_out" >&2
+    echo "请运行: (cd go && gofmt -s -w .)" >&2
+    exit 1
+  fi
+fi
