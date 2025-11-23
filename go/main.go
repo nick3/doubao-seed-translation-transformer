@@ -679,7 +679,7 @@ type languageEntry struct {
 
 var languages = []languageEntry{
 	{Code: "zh", Names: []string{"中文（简体）", "simplified chinese", "Simplified Chinese Language", "简体中文", "chinese", "zh"}},
-	{Code: "zh-Hant", Names: []string{"中文（繁体）", "traditional chinese", "Traditional Chinese (Taiwan) Language", "Traditional Chinese (Hong Kong) Language", "Northeastern Chinese Language", "繁體中文", "zh-hant"}},
+	{Code: "zh-Hant", Names: []string{"中文（繁体）", "traditional chinese", "Traditional Chinese (Taiwan) Language", "Traditional Chinese (Hong Kong) Language", "繁體中文", "zh-hant"}},
 	{Code: "en", Names: []string{"英语", "english", "English Language", "en"}},
 	{Code: "ja", Names: []string{"日语", "japanese", "Japanese Language", "日本語", "ja"}},
 	{Code: "ko", Names: []string{"韩语", "korean", "Korean Language", "한국어", "ko"}},
