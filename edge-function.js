@@ -551,7 +551,7 @@ function streamDoubaoResponse(upstreamResponse, modelId) {
 // === 语言处理 ===
 const languages = [
     { code: 'zh', names: ['中文（简体）', 'simplified chinese', 'Simplified Chinese Language', '简体中文', 'chinese', 'zh'] },
-    { code: 'zh-Hant', names: ['中文（繁体）', 'traditional chinese', 'traditional chinese', 'Traditional Chinese (Taiwan) Language', 'Traditional Chinese (Hong Kong) Language', '繁體中文', 'zh-hant'] },
+    { code: 'zh-Hant', names: ['中文（繁体）', 'traditional chinese', 'Traditional Chinese (Taiwan) Language', 'Traditional Chinese (Hong Kong) Language', '繁體中文', 'zh-hant'] },
     { code: 'en', names: ['英语', 'english', 'English Language', 'en'] },
     { code: 'ja', names: ['日语', 'japanese', 'Japanese Language', '日本語', 'ja'] },
     { code: 'ko', names: ['韩语', 'korean', 'Korean Language', '한국어', 'ko'] },
