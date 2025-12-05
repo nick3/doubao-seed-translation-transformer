@@ -1,6 +1,6 @@
 # doubao-seed-translation-transformer
 
-将豆包（doubao-seed-translation）模型的 API 接口转换为兼容 OpenAI Chat Completions API 的形式。通过腾讯 EdgeOne 边缘函数实现，无需服务器即可快速部署。
+将豆包（doubao-seed-translation）模型的 API 接口转换为兼容 OpenAI Chat Completions API 的形式。支持腾讯 EdgeOne 边缘函数和 Cloudflare Worker 两种无服务器部署方式，无需服务器即可快速部署。
 
 ## 功能特性
 
@@ -21,9 +21,21 @@
 4. 配置环境变量（如果需要）。
 5. 部署函数并获取函数 URL。
 
+### 部署到 Cloudflare Worker
+
+1. 注册并登录 [Cloudflare Dashboard](https://dash.cloudflare.com/)。
+2. 进入 Workers & Pages，创建新的 Worker 服务。
+3. 将 `cf-workers.js` 的代码复制到 Worker 编辑器中。
+4. 保存并部署，获取 Worker 的访问域名。
+
+> ⚠️ Cloudflare Worker 版本与 EdgeOne 版本功能完全一致，API 路径、参数、响应格式均兼容 OpenAI Chat Completions API。
+
 ### 使用 API
 
-API 端点：`https://your-edgeone-domain.com/v1/chat/completions`
+API 端点：
+
+- EdgeOne: `https://your-edgeone-domain.com/v1/chat/completions`
+- Cloudflare Worker: `https://your-worker-subdomain.workers.dev/v1/chat/completions`
 
 #### 请求示例
 
@@ -69,6 +81,13 @@ API 端点：`https://your-edgeone-domain.com/v1/chat/completions`
   }
 }
 ```
+
+#### 兼容性说明
+
+- Cloudflare Worker 版本与 EdgeOne 版本完全兼容，均支持 `/v1/chat/completions` 和 `/v1/responses` 路径。
+- 支持流式（`stream: true`）和非流式响应。
+- 支持 Bearer Token 认证，需在请求头中添加 `Authorization: Bearer <token>`。
+- 支持所有语言选项和错误处理。
 
 ## Go 自托管部署
 
@@ -146,42 +165,43 @@ CI 成功后即可在 Releases 页面下载多平台构建产物，用于自托�
 
 ### 支持的语言列表
 
-| 语种中文名称 | 语种英文名称 | 原语言名称 | 编码 |
-| :--- | :--- | :--- | :--- |
-| 中文（简体） | Simplified Chinese | 简体中文 | zh |
-| 中文（繁体） | Traditional Chinese | 繁體中文 | zh-Hant |
-| 英语 | English | - | en |
-| 日语 | Japanese | 日本語 | ja |
-| 韩语 | Korean | 한국어 | ko |
-| 德语 | German | Deutsch | de |
-| 法语 | French | Français | fr |
-| 西班牙语 | Spanish | Español | es |
-| 意大利语 | Italian | Italiano | it |
-| 葡萄牙语 | Portuguese | Português | pt |
-| 俄语 | Russian | Русский | ru |
-| 泰语 | Thai | ไทย | th |
-| 越南语 | Vietnamese | Tiếng Việt | vi |
-| 阿拉伯语 | Arabic | العربية | ar |
-| 捷克语 | Czech | Čeština | cs |
-| 丹麦语 | Danish | Dansk | da |
-| 芬兰语 | Finnish | Suomi | fi |
-| 克罗地亚语 | Croatian | Hrvatski | hr |
-| 匈牙利语 | Hungarian | Magyar | hu |
-| 印尼语 | Indonesian | Bahasa Indonesia | id |
-| 马来语 | Malay | Bahasa Melayu | ms |
-| 挪威布克莫尔语 | Norwegian Bokmål | Norsk Bokmål | nb |
-| 荷兰语 | Dutch | Nederlands | nl |
-| 波兰语 | Polish | Polski | pl |
-| 罗马尼亚语 | Romanian | Română | ro |
-| 瑞典语 | Swedish | Svenska | sv |
-| 土耳其语 | Turkish | Türkçe | tr |
-| 乌克兰语 | Ukrainian | Українська | uk |
+| 语种中文名称   | 语种英文名称        | 原语言名称       | 编码    |
+| :------------- | :------------------ | :--------------- | :------ |
+| 中文（简体）   | Simplified Chinese  | 简体中文         | zh      |
+| 中文（繁体）   | Traditional Chinese | 繁體中文         | zh-Hant |
+| 英语           | English             | -                | en      |
+| 日语           | Japanese            | 日本語           | ja      |
+| 韩语           | Korean              | 한국어           | ko      |
+| 德语           | German              | Deutsch          | de      |
+| 法语           | French              | Français         | fr      |
+| 西班牙语       | Spanish             | Español          | es      |
+| 意大利语       | Italian             | Italiano         | it      |
+| 葡萄牙语       | Portuguese          | Português        | pt      |
+| 俄语           | Russian             | Русский          | ru      |
+| 泰语           | Thai                | ไทย              | th      |
+| 越南语         | Vietnamese          | Tiếng Việt       | vi      |
+| 阿拉伯语       | Arabic              | العربية          | ar      |
+| 捷克语         | Czech               | Čeština          | cs      |
+| 丹麦语         | Danish              | Dansk            | da      |
+| 芬兰语         | Finnish             | Suomi            | fi      |
+| 克罗地亚语     | Croatian            | Hrvatski         | hr      |
+| 匈牙利语       | Hungarian           | Magyar           | hu      |
+| 印尼语         | Indonesian          | Bahasa Indonesia | id      |
+| 马来语         | Malay               | Bahasa Melayu    | ms      |
+| 挪威布克莫尔语 | Norwegian Bokmål    | Norsk Bokmål     | nb      |
+| 荷兰语         | Dutch               | Nederlands       | nl      |
+| 波兰语         | Polish              | Polski           | pl      |
+| 罗马尼亚语     | Romanian            | Română           | ro      |
+| 瑞典语         | Swedish             | Svenska          | sv      |
+| 土耳其语       | Turkish             | Türkçe           | tr      |
+| 乌克兰语       | Ukrainian           | Українська       | uk      |
 
 ### 配置示例
 
 以下示例展示了不同的语言名称格式，都会被正确识别和转换：
 
 **使用语言编码：**
+
 ```json
 {
   "role": "system",
@@ -190,14 +210,16 @@ CI 成功后即可在 Releases 页面下载多平台构建产物，用于自托�
 ```
 
 **使用中文名称：**
+
 ```json
 {
-  "role": "system", 
+  "role": "system",
   "content": "{\"source_language\": \"英语\", \"target_language\": \"中文（简体）\"}"
 }
 ```
 
 **使用英文名称：**
+
 ```json
 {
   "role": "system",
@@ -206,6 +228,7 @@ CI 成功后即可在 Releases 页面下载多平台构建产物，用于自托�
 ```
 
 **使用原语言名称：**
+
 ```json
 {
   "role": "system",
@@ -214,6 +237,7 @@ CI 成功后即可在 Releases 页面下载多平台构建产物，用于自托�
 ```
 
 **混合使用：**
+
 ```json
 {
   "role": "system",
