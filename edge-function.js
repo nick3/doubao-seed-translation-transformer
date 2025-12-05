@@ -103,10 +103,10 @@ function parseResponsesInput(input) {
         const rawContent = segment.content ?? segment.input ?? segment.text ?? segment.value;
         const text = extractTextFromContent(rawContent);
         if (role === "system" && text) {
-            if (!systemPrompt) systemPrompt = text;
+            systemPrompt = text;
             return;
         }
-        if ((!role || role === "user") && text && !userContent) {
+        if ((!role || role === "user") && text) {
             userContent = text;
         }
     };
@@ -161,6 +161,18 @@ function mergeTranslationOverrides(targetOptions, ...sources) {
 }
 
 /**
+ * 从豆包响应中提取助手消息内容
+ * @param {object} doubaoResponse - 火山引擎 API 的响应体
+ * @returns {string|undefined} - 提取的消息内容
+ */
+function extractAssistantMessage(doubaoResponse) {
+    return doubaoResponse.output
+        ?.find(o => o.type === 'message' && o.role === 'assistant')
+        ?.content?.find(c => c.type === 'output_text')
+        ?.text;
+}
+
+/**
  * 将火山引擎的响应转换为 OpenAI 格式
  * @param {object} doubaoResponse - 火山引擎 API 的响应体
  * @param {string} requestModelId - 用户请求中指定的模型 ID
@@ -172,10 +184,7 @@ function convertToOpenAIResponse(doubaoResponse, requestModelId) {
         return errorRes(ERROR_TEMPLATES.upstreamError, 500, errorMessage);
     }
 
-    const messageContent = doubaoResponse.output
-        ?.find(o => o.type === 'message' && o.role === 'assistant')
-        ?.content?.find(c => c.type === 'output_text')
-        ?.text;
+    const messageContent = extractAssistantMessage(doubaoResponse);
 
     if (!messageContent) {
         return errorRes(ERROR_TEMPLATES.upstreamError, 500, "未找到有效的翻译结果");
@@ -223,10 +232,7 @@ function convertToResponsesResponse(doubaoResponse, requestModelId) {
     };
 
     if (!Array.isArray(responsePayload.output)) {
-        const messageContent = doubaoResponse.output
-            ?.find(o => o.type === 'message' && o.role === 'assistant')
-            ?.content?.find(c => c.type === 'output_text')
-            ?.text;
+        const messageContent = extractAssistantMessage(doubaoResponse);
         responsePayload.output = messageContent
             ? [{
                 id: genId('msg'),
@@ -305,7 +311,7 @@ async function handleRequest(request) {
 }
 
 async function handleChatCompletionsRequest({ data, auth }) {
-    const userMsgContent = data.messages?.findLast?.(m => m?.role === "user")?.content;
+    const userMsgContent = extractTextFromContent(data.messages?.findLast?.(m => m?.role === "user")?.content);
     if (!userMsgContent) return errorRes('noMessage');
 
     const modelId = data.model;
